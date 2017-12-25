@@ -40,6 +40,10 @@
 #define READ_ALL    0x83
 #define EMPTY    0x45
 
+#define BEGIN_SRAM 	0xF0
+#define PROG_SRAM 	0xF1
+#define END_SRAM 	0xF2
+
 
 #define _GNU_SOURCE
 #include <stdio.h>
@@ -502,7 +506,7 @@ int main(int argc, char **argv)
 
  		
 char *portname = SerialPort;
-	while ((opt = getopt(argc, argv, "I:rcbntvwfeh")) != -1)
+	while ((opt = getopt(argc, argv, "I:Srcbntvwfeh")) != -1)
  
 
 	{
@@ -613,13 +617,81 @@ set_blocking (fd, 0);                // set no blocking
 	}
 	else if (prog_sram)
 	{
-		fprintf(stderr, "\nprogramming SRAM is not supported!\n");
+		
+		// ---------------------------------------------------------
+		// Program SRAM
+		// ---------------------------------------------------------
+		
+		if (!read_mode && !check_mode && !bulk_erase_only) {
+			
+			FILE *f = (strcmp(filename, "-") == 0) ? stdin : fopen(filename, "r");
+			if (f == NULL) {
+				fprintf(stderr, "Error: Can't open '%s' for reading: %s\n", filename, strerror(errno));
+				error();
+			}
+
+			fprintf(stderr, "\nProgramming SRAM...\n");
+			int ccc;
+			
+			startframe(BEGIN_SRAM);
+			sendframe();
+			waitframe(READY);
+				
+			for (addr = 0; true; addr += 256) {
+				uint8_t buffer[256];
+				int rc = fread(buffer, 1, 256, f);
+
+				if (rc <= 0) break;
+				
+				if (verbose)
+					fprintf(stderr, "prog 0x%06X +0x%03X..\n", addr, rc);
+				else
+					fprintf(stderr, "\rprog 0x%06X +0x%03X..", addr, rc);
+				
+				for (ccc=0;ccc<rc;ccc++) {
+					if ((buffer[ccc] != 0xFF) || (ff_mode)) {
+						int x;
+						
+						while(1) {
+							
+							startframe(PROG_SRAM);
+							addbyte(addr>>16);
+							addbyte(addr>>8);
+							
+							for (x=0;x<rc;x++)
+								addbyte(buffer[x]);
+								
+							sendframe();
+								
+							fprintf(stderr, ".");
+												
+							if (waitframe(READY)) break;
+						
+						}
+						break;
+					}	
+				}
+			
+			}
+			fprintf(stderr, "\n");
+ 
+			if (f != stdin)
+				fclose(f);
+				
+			// Can't read back SRAM in SPI slave mode
+		
+			startframe(END_SRAM);
+			sendframe();
+
+			fprintf(stderr, "\nPROGRAM OK\n");
+		}
+		
 	}
 	else
 	{
 		
 		// ---------------------------------------------------------
-		// Program
+		// Program flash
 		// ---------------------------------------------------------
 
 		if (!read_mode && !check_mode && !bulk_erase_only)
@@ -659,7 +731,7 @@ set_blocking (fd, 0);                // set no blocking
 				}
 			}
 
-			fprintf(stderr, "\nprogramming..\n");
+			fprintf(stderr, "\nProgramming flash...\n");
 int ccc;	
 
 				flash_read_id();
